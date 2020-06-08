@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+//from: https://stackoverflow.com/a/27592777
 #define GETMASK(index, size) (((1 << (size)) - 1) << (index))
 #define READFROM(data, index, size) (((data) & GETMASK((index), (size))) >> (index))
 #define WRITETO(data, index, size, value) ((data) = ((data) & (~GETMASK((index), (size)))) | ((value) << (index)))

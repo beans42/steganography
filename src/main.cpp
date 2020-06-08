@@ -56,7 +56,7 @@ uint8_t read_byte_from_image(const void* image, const unsigned offset) {
 auto read_entire_image(const void* image, unsigned image_size) {
 	std::vector<uint8_t> bytes;
 	image_size /= 4;
-	for (int i = 0; i < image_size; i++)
+	for (unsigned i = 0; i < image_size; i++)
 		bytes.push_back(read_byte_from_image(image, i));
 	return bytes;
 }
@@ -90,7 +90,7 @@ void write_entire_message_to_image(const void* image, const unsigned image_size,
 	const auto bytes = new uint8_t[total_len];
 	*(header_t*)bytes = { random_64_bit_key, msg_len };
 	memcpy(bytes + sizeof(header_t), message.data(), msg_len);
-	for (int i = 0; i < total_len; i++)
+	for (unsigned i = 0; i < total_len; i++)
 		write_byte_to_image(image, i, bytes[i]);
 }
 

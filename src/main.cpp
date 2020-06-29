@@ -24,7 +24,7 @@ constexpr uint64_t random_64_bit_key = 0xF3D37B0C676EDCA6;
 
 struct header_t {
 	uint64_t key; //if equal to random_64_bit_key, image actually contains steganography (from this program)
-	size_t msg_length; //determines length of originally encoded message
+	uint64_t msg_length; //determines length of originally encoded message
 };
 
 struct split_byte {

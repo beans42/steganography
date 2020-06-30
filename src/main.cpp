@@ -8,6 +8,18 @@
 #include <string>
 #include <vector>
 
+//https://stackoverflow.com/a/27592777
+#define GETMASK(index, size) (((1 << (size)) - 1) << (index))
+#define READFROM(data, index, size) (((data) & GETMASK((index), (size))) >> (index))
+#define WRITETO(data, index, size, value) ((data) = ((data) & (~GETMASK((index), (size)))) | ((value) << (index)))
+#define FIELD(data, name, index, size)             \
+	inline decltype(data) name() {                 \
+		return READFROM(data, index, size);        \
+	}                                              \
+	inline void set_##name(decltype(data) value) { \
+		WRITETO(data, index, size, value);         \
+	}
+
 constexpr uint64_t random_64_bit_key = 0xF3D37B0C676EDCA6;
 
 struct header_t {
@@ -15,19 +27,33 @@ struct header_t {
 	uint64_t msg_length; //if present, dictates length of originally encoded message
 };
 
-using bool_vec_t = std::vector<bool>;
+struct split_byte {
+	uint8_t data;
+	FIELD(data, d1, 0, 2);
+	FIELD(data, d2, 2, 2);
+	FIELD(data, d3, 4, 2);
+	FIELD(data, d4, 6, 2);
+};
 
-uint8_t read_byte_from_image(const bool_vec_t& image, const unsigned offset) {
-	bool_vec_t out(8);
-	const auto start = offset * 4 * 8;
-	for (int i = 0; i < 4; i++) {
-		out[i * 2] = image[start + (i * 8) + 0];
-		out[i * 2 + 1] = image[start + (i * 8) + 1];
-	}
-	return *(uint8_t*)out._Myvec.data();
+struct image_bytes {
+	uint8_t _1, _2, _3, _4;
+	FIELD(_1, first_bits,  0, 2);
+	FIELD(_2, second_bits, 0, 2);
+	FIELD(_3, third_bits,  0, 2);
+	FIELD(_4, fourth_bits, 0, 2);
+};
+
+uint8_t read_byte_from_image(const void* image, const unsigned offset) {
+	const auto start = (image_bytes*)image + offset;
+	split_byte buffer;
+	buffer.set_d1(start->first_bits());
+	buffer.set_d2(start->second_bits());
+	buffer.set_d3(start->third_bits());
+	buffer.set_d4(start->fourth_bits());
+	return buffer.data;
 }
 
-auto read_entire_image(const bool_vec_t& image, unsigned image_size) {
+auto read_entire_image(const void* image, unsigned image_size) {
 	std::vector<uint8_t> bytes;
 	image_size /= 4;
 	for (unsigned i = 0; i < image_size; i++)
@@ -39,26 +65,28 @@ std::string get_message_from_bytes(const std::vector<uint8_t>& bytes) {
 	header_t header = *(header_t*)bytes.data();
 	if (header.magic != random_64_bit_key)
 		return "image not encoded by this program";
+
 	std::string out(header.msg_length, ' ');
 	memcpy((void*)out.data(), bytes.data() + sizeof(header_t), header.msg_length);
 	return out;
 }
 
-void write_byte_to_image(bool_vec_t& image, const unsigned offset, const uint8_t byte) {
-	bool_vec_t out(8);
-	*(uint8_t*)out._Myvec.data() = byte;
-	const auto start = offset * 4 * 8;
-	for (int i = 0; i < 4; i++) {
-		image[start + (i * 8) + 0] = out[i * 2];
-		image[start + (i * 8) + 1] = out[i * 2 + 1];
-	}
+void write_byte_to_image(const void* image, const unsigned offset, const uint8_t byte) {
+	const auto start = (image_bytes*)image + offset;
+	split_byte buffer = { byte };
+	start->set_first_bits(buffer.d1());
+	start->set_second_bits(buffer.d2());
+	start->set_third_bits(buffer.d3());
+	start->set_fourth_bits(buffer.d4());
 }
 
-void write_entire_message_to_image(bool_vec_t& image, const unsigned image_size, const std::string& message) {
+void write_entire_message_to_image(const void* image, const unsigned image_size, const std::string& message) {
 	const auto msg_len = message.length();
 	const auto total_len = msg_len + sizeof(header_t);
-	if (image_size / 4 < total_len)
-		throw std::exception("error! message too large, use bigger picture");
+	if (image_size / 4 < total_len) {
+		std::cout << "error! message too large, use bigger picture";
+		return;
+	}
 	const auto bytes = new uint8_t[total_len];
 	*(header_t*)bytes = { random_64_bit_key, msg_len };
 	memcpy(bytes + sizeof(header_t), message.data(), msg_len);
@@ -69,7 +97,7 @@ void write_entire_message_to_image(bool_vec_t& image, const unsigned image_size,
 
 int main(int argc, char** argv) {
 	if (argc < 3 || (strcmp(argv[1], "-e") != 0 && strcmp(argv[1], "-d") != 0)) {
-		printf("incorrect usage:\n");
+		printf("incorrect usage, usage:\n");
 		printf("encode image and output to same file:   main.exe -e input.png \"message\"\n");
 		printf("encode image and output to diff file:   main.exe -e input.png output.png \"message\"\n");
 		printf("decode image (encoded by this program): main.exe -d input.png\n");
@@ -81,22 +109,18 @@ int main(int argc, char** argv) {
 	int width, height, channels;
 	const auto image = stbi_load(argv[2], &width, &height, &channels, STBI_default);
 	const auto image_size = width * height * channels;
-
+	
 	if (!image) {
 		printf("unable to open file");
 		return 0;
 	}
 
-	bool_vec_t image_bits(image_size * 8);
-	memcpy(image_bits._Myvec.data(), image, image_size);
-
 	if (strcmp(argv[1], "-e") == 0) {
 		const auto message = argc == 5 ? std::string(argv[4]) : std::string(argv[3]);
-		write_entire_message_to_image(image_bits, image_size, message);
-		stbi_write_png(argc == 5 ? argv[3] : argv[2], width, height, channels, image_bits._Myvec.data(), width * channels);
-	}
-	else {
-		const auto bytes = read_entire_image(image_bits, image_size);
+		write_entire_message_to_image(image, image_size, message);
+		stbi_write_png(argc == 5 ? argv[3] : argv[2], width, height, channels, image, width * channels);
+	} else {
+		const auto bytes = read_entire_image(image, image_size);
 		std::cout << get_message_from_bytes(bytes);
 	}
 
